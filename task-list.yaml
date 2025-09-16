@@ -1,0 +1,85 @@
+project: "WebChat Extension"
+description: "A browser extension for real-time, site-specific chat."
+
+phases:
+  - phase: "Setup and Manifest"
+    description: "Define the core structure and permissions of the extension."
+    steps:
+      - step: "Create project directory"
+        action: "Create a new folder for your extension files."
+      - step: "Create manifest.json"
+        action: "Define the extension's metadata and permissions."
+        files:
+          - "manifest.json"
+        content_example:
+          manifest_version: 3
+          name: "SiteChat"
+          version: "1.0"
+          description: "Real-time chat for any website."
+          permissions:
+            - "storage"
+            - "tabs"
+          action:
+            default_popup: "popup.html"
+          background:
+            service_worker: "background.js"
+          content_scripts:
+            - matches: ["<all_urls>"]
+              js: ["content.js"]
+
+  - phase: "Frontend Development (Popup and UI)"
+    description: "Build the user interface for the chat window."
+    steps:
+      - step: "Create popup.html"
+        action: "Design the HTML structure for the popup window."
+        files:
+          - "popup.html"
+      - step: "Style the popup"
+        action: "Use CSS to style the chat window, input fields, and message display."
+        files:
+          - "styles.css"
+      - step: "Add basic popup logic"
+        action: "Write JavaScript to handle user input and display messages within the popup."
+        files:
+          - "popup.js"
+
+  - phase: "Backend and Real-time Communication"
+    description: "Implement the server-side and real-time messaging logic."
+    steps:
+      - step: "Choose a backend technology"
+        action: "Select a language/framework like Node.js, Python/Flask, or similar."
+        considerations: "Ease of use, support for WebSockets."
+      - step: "Set up a server"
+        action: "Create a server to handle incoming messages and broadcast them."
+        technologies:
+          - "WebSockets (e.g., using `ws` library for Node.js)"
+      - step: "Implement messaging logic"
+        action: "Write code to store the last 50 messages and send new messages to all connected clients on a given URL."
+
+  - phase: "Extension Logic (Communication and Storage)"
+    description: "Connect the frontend and backend, and handle data persistence."
+    steps:
+      - step: "Connect to the server"
+        action: "Use JavaScript in `popup.js` and `background.js` to establish a WebSocket connection."
+      - step: "Store messages locally"
+        action: "Use the `chrome.storage.local` API to save and retrieve the last 50 messages, ensuring they persist."
+        code_example:
+          - "chrome.storage.local.get('messages', ...)"
+          - "chrome.storage.local.set({ messages: updatedArray }, ...)"
+      - step: "Handle voice messages"
+        action: "Use the Web Audio API to record audio, send it to the server, and play it back for other users."
+        dependencies:
+          - "MediaRecorder API"
+          - "Web Audio API"
+
+  - phase: "User Experience and Polish"
+    description: "Refine the user experience and prepare for publishing."
+    steps:
+      - step: "Implement draggable pop-up"
+        action: "Write JavaScript in a content script to make the chat window draggable and placeable anywhere on the screen."
+        files:
+          - "content.js"
+      - step: "Add timestamps to messages"
+        action: "Ensure each message includes a timestamp for chronological order."
+      - step: "Prepare for publishing"
+        action: "Create promotional assets, a detailed description, and submit the extension to the Chrome Web Store."
