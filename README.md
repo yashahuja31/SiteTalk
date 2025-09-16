@@ -171,7 +171,7 @@ We welcome contributions!
 
 ## 📜 License
 
-MIT License © 2025 \SiteChat
+MIT License © 2025 SiteChat
 
 ---
 
