@@ -6,14 +6,17 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "Yash Ahuja",
+  "license": "MTI",
   "description": "",
   "dependencies": {
+    "@tailwindcss/cli": "^4.1.13",
+    "@tailwindcss/vite": "^4.1.13",
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "nodemon": "^3.1.10",
     "socket.io": "^4.8.1",
-    "socket.io-client": "^4.8.1"
+    "socket.io-client": "^4.8.1",
+    "tailwindcss": "^4.1.13"
   }
 }
