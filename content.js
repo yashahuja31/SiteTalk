@@ -400,12 +400,19 @@
       display: flex; align-items: center; justify-content: center; padding: 0 4px;
       border: 2px solid #fff;
     }
+    .st-unread[hidden] { display: none !important; }
     .st-panel {
       position: fixed; bottom: 84px; right: 20px; width: 320px; height: 440px;
       background: #14161F; color: #EDEEF3; border-radius: 16px; overflow: hidden;
       box-shadow: 0 20px 60px rgba(10, 12, 20, 0.45); display: flex; flex-direction: column;
       border: 1px solid rgba(255,255,255,0.06);
     }
+    /* The [hidden] attribute normally maps to display:none via the browser's
+       default stylesheet, but that default loses to our own "display: flex"
+       rule above (author styles always beat user-agent styles). Without this
+       override, toggling .hidden in JS does nothing visible — this is the
+       actual fix for the minimize button (and the unread badge below). */
+    .st-panel[hidden] { display: none !important; }
     .st-header {
       display: flex; align-items: center; justify-content: space-between; padding: 12px 14px;
       background: #1B1E2B; cursor: move; user-select: none; border-bottom: 1px solid rgba(255,255,255,0.06);

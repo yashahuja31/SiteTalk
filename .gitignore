@@ -3,6 +3,3 @@ server/data.json
 server/.env
 .DS_Store
 *.log
-DEPLOYING_GLOBALLY.md
-.env
-.gitignore
