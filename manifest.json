@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "SiteChat",
+  "name": "SiteTalk — Chat on Any Website",
   "version": "1.0.0",
-  "description": "Real-time chat with other users on the same website",
+  "description": "Talk with anyone browsing the same page, right now. Anonymous by default, sign in when you want a name that sticks.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -19,6 +19,9 @@
   "permissions": [
     "storage",
     "activeTab"
+  ],
+  "host_permissions": [
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"

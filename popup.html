@@ -1,47 +1,79 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="utf-8">
-    <link rel="stylesheet" href="tailwind.css">
+  <meta charset="UTF-8" />
+  <title>SiteTalk</title>
+  <link rel="stylesheet" href="popup.css" />
 </head>
-<body class="w-80 h-96 m-0 p-4 bg-gradient-to-br from-indigo-500 via-purple-500 to-purple-700 text-white">
-    <div class="text-center mb-5">
-        <h1 class="m-0 text-2xl font-semibold">🚀 SiteChat</h1>
-    </div>
-    
-    <div class="bg-white/20 rounded-lg p-3 mb-5 break-all">
-        <strong>Current Site:</strong>
-        <div id="currentUrl" class="mt-1">Loading...</div>
-    </div>
-    
-    <div class="flex justify-between mb-5 text-sm">
-        <div class="bg-white/10 py-2 px-3 rounded-full flex-1 text-center mx-1">
-            <div id="messageCount" class="font-medium">0</div>
-            <div class="text-xs opacity-90">Messages</div>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <span class="brand-name">SiteTalk</span>
+      </div>
+      <button id="settingsToggle" class="icon-btn" title="Advanced settings">⚙</button>
+    </header>
+
+    <section class="status-card">
+      <div class="status-row">
+        <span id="statusDot" class="status-dot"></span>
+        <span id="statusText">Checking this tab…</span>
+      </div>
+      <div id="roomLabel" class="room-label"></div>
+      <button id="openPanelBtn" class="btn primary full">Open chat on this page</button>
+    </section>
+
+    <section class="identity-card">
+      <div class="tabs">
+        <button class="tab active" data-tab="anon">Anonymous</button>
+        <button class="tab" data-tab="account">Account</button>
+      </div>
+
+      <div id="tab-anon" class="tab-panel active">
+        <p class="hint">You're chatting as a random guest name on every site. No sign-up needed — great for quick, throwaway conversations.</p>
+        <label class="field-label">Guest name on this device</label>
+        <div class="inline-field">
+          <input id="guestNameInput" type="text" maxlength="24" placeholder="Loading…" />
+          <button id="saveGuestName" class="btn small">Save</button>
         </div>
-        <div class="bg-white/10 py-2 px-3 rounded-full flex-1 text-center mx-1">
-            <div id="onlineCount" class="font-medium">1</div>
-            <div class="text-xs opacity-90">Online</div>
+      </div>
+
+      <div id="tab-account" class="tab-panel">
+        <div id="loggedOutView">
+          <p class="hint">Sign in to keep the same name and message history across every site and device.</p>
+          <input id="emailInput" type="email" placeholder="Email" class="field" />
+          <input id="passwordInput" type="password" placeholder="Password" class="field" />
+          <div class="button-row">
+            <button id="loginBtn" class="btn primary">Sign in</button>
+            <button id="signupBtn" class="btn ghost">Create account</button>
+          </div>
+          <p id="authError" class="auth-error" hidden></p>
         </div>
-    </div>
-    
-    <div class="flex flex-col gap-3">
-        <button id="openChatBtn" class="bg-white/90 text-indigo-600 border-0 py-3 px-5 rounded-full cursor-pointer text-base font-medium transition-all duration-300 hover:bg-white hover:-translate-y-0.5 backdrop-blur-sm">
-            💬 Open Chat Window
-        </button>
-        <button id="clearChatBtn" class="bg-white/20 text-white border-0 py-3 px-5 rounded-full cursor-pointer text-base font-medium transition-all duration-300 hover:bg-white/30 hover:-translate-y-0.5 backdrop-blur-sm">
-            🗑️ Clear Chat History
-        </button>
-        <button id="settingsBtn" class="bg-white/20 text-white border-0 py-3 px-5 rounded-full cursor-pointer text-base font-medium transition-all duration-300 hover:bg-white/30 hover:-translate-y-0.5 backdrop-blur-sm">
-            ⚙️ Settings
-        </button>
-    </div>
-    
-    <div class="text-center mt-4 text-xs opacity-80">
-        <span class="inline-block w-2 h-2 bg-green-400 rounded-full mr-1"></span>
-        Ready to chat!
-    </div>
-    
-    <script src="popup.js"></script>
+        <div id="loggedInView" hidden>
+          <p class="hint">Signed in as <strong id="accountEmail"></strong>.</p>
+          <label class="field-label">Display name</label>
+          <div class="inline-field">
+            <input id="displayNameInput" type="text" maxlength="24" />
+            <button id="saveDisplayName" class="btn small">Save</button>
+          </div>
+          <button id="logoutBtn" class="btn ghost full">Sign out</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="advancedCard" class="advanced-card" hidden>
+      <label class="field-label">Server address</label>
+      <input id="serverUrlInput" type="text" class="field" placeholder="wss://your-server.example.com" />
+      <button id="saveServerUrl" class="btn small full">Save server address</button>
+    </section>
+
+    <footer class="app-footer">
+      <a href="https://github.com/yashahuja31/SiteTalk" target="_blank" rel="noopener">GitHub</a>
+      <span class="dot-sep">·</span>
+      <a href="https://sitetalk.app" target="_blank" rel="noopener">sitetalk.app</a>
+    </footer>
+  </div>
+  <script src="popup.js"></script>
 </body>
 </html>

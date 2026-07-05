@@ -1,88 +1,138 @@
-document.addEventListener('DOMContentLoaded', function() {
-    // Get DOM elements
-    const currentUrlElement = document.getElementById('currentUrl');
-    const messageCountElement = document.getElementById('messageCount');
-    const onlineCountElement = document.getElementById('onlineCount');
-    const openChatBtn = document.getElementById('openChatBtn');
-    const clearChatBtn = document.getElementById('clearChatBtn');
-    const settingsBtn = document.getElementById('settingsBtn');
+const send = (msg) => new Promise((resolve) => chrome.runtime.sendMessage(msg, resolve));
 
-    // Get current tab URL
-    chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-        const currentTab = tabs[0];
-        const url = new URL(currentTab.url);
-        const domain = url.hostname;
-        currentUrlElement.textContent = domain;
-        
-        // Get message count for this domain
-        chrome.storage.local.get([domain], function(result) {
-            const messages = result[domain] || [];
-            messageCountElement.textContent = messages.length;
-        });
+let settings = null;
+
+init();
+
+async function init() {
+  settings = await send({ type: "GET_SETTINGS" });
+
+  const tabState = await send({ type: "GET_TAB_STATE" });
+  renderStatus(tabState);
+
+  document.getElementById("guestNameInput").value = await currentGuestName();
+  document.getElementById("serverUrlInput").value = settings.serverUrl || "";
+  document.getElementById("displayNameInput").value = settings.displayName || "";
+
+  if (settings.mode === "account" && settings.authToken) {
+    showLoggedIn(settings.accountEmail || "");
+    selectTab("account");
+  }
+
+  wireEvents();
+}
+
+function renderStatus(state) {
+  const dot = document.getElementById("statusDot");
+  const text = document.getElementById("statusText");
+  const room = document.getElementById("roomLabel");
+  dot.className = `status-dot ${state.connected ? "connected" : "offline"}`;
+  text.textContent = state.connected
+    ? `Connected · ${state.participants} ${state.participants === 1 ? "person" : "people"} here`
+    : "Not connected on this tab";
+  room.textContent = state.room ? `Room: ${state.room}` : "";
+}
+
+async function currentGuestName() {
+  const { siteTalkGuest } = await chrome.storage.local.get("siteTalkGuest");
+  return siteTalkGuest?.name || "Guest";
+}
+
+function wireEvents() {
+  document.getElementById("openPanelBtn").addEventListener("click", () => {
+    send({ type: "TOGGLE_PANEL_FROM_POPUP" });
+    window.close();
+  });
+
+  document.getElementById("settingsToggle").addEventListener("click", () => {
+    const el = document.getElementById("advancedCard");
+    el.hidden = !el.hidden;
+  });
+
+  document.querySelectorAll(".tab").forEach((tab) => {
+    tab.addEventListener("click", () => selectTab(tab.dataset.tab));
+  });
+
+  document.getElementById("saveGuestName").addEventListener("click", async () => {
+    const name = document.getElementById("guestNameInput").value.trim().slice(0, 24);
+    if (!name) return;
+    const { siteTalkGuest } = await chrome.storage.local.get("siteTalkGuest");
+    await chrome.storage.local.set({ siteTalkGuest: { ...(siteTalkGuest || {}), name, id: siteTalkGuest?.id || crypto.randomUUID() } });
+    flash(document.getElementById("saveGuestName"));
+  });
+
+  document.getElementById("saveServerUrl").addEventListener("click", async () => {
+    const serverUrl = document.getElementById("serverUrlInput").value.trim();
+    settings = await send({ type: "SAVE_SETTINGS", settings: { serverUrl } });
+    flash(document.getElementById("saveServerUrl"));
+  });
+
+  document.getElementById("saveDisplayName").addEventListener("click", async () => {
+    const displayName = document.getElementById("displayNameInput").value.trim().slice(0, 24);
+    settings = await send({ type: "SAVE_SETTINGS", settings: { displayName } });
+    flash(document.getElementById("saveDisplayName"));
+  });
+
+  document.getElementById("loginBtn").addEventListener("click", () => authRequest("/api/login"));
+  document.getElementById("signupBtn").addEventListener("click", () => authRequest("/api/signup"));
+
+  document.getElementById("logoutBtn").addEventListener("click", async () => {
+    settings = await send({ type: "SAVE_SETTINGS", settings: { mode: "anonymous", authToken: null, accountEmail: "" } });
+    showLoggedOut();
+  });
+}
+
+function selectTab(name) {
+  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
+  document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("active", p.id === `tab-${name}`));
+}
+
+async function authRequest(path) {
+  const email = document.getElementById("emailInput").value.trim();
+  const password = document.getElementById("passwordInput").value;
+  const errorEl = document.getElementById("authError");
+  errorEl.hidden = true;
+
+  if (!email || !password) {
+    errorEl.textContent = "Enter an email and password.";
+    errorEl.hidden = false;
+    return;
+  }
+
+  const base = (settings.serverUrl || "").replace(/^wss/, "https").replace(/^ws/, "http");
+  try {
+    const res = await fetch(`${base}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
     });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Something went wrong.");
 
-    // Open chat window
-    openChatBtn.addEventListener('click', function() {
-        chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-            // First check if we can communicate with the content script
-            chrome.tabs.sendMessage(tabs[0].id, {action: "ping"}, function(response) {
-                if (chrome.runtime.lastError) {
-                    // Content script not ready, inject it
-                    chrome.scripting.executeScript({
-                        target: {tabId: tabs[0].id},
-                        files: ['content.js']
-                    }, function() {
-                        // Now try to open chat after a short delay
-                        setTimeout(function() {
-                            chrome.tabs.sendMessage(tabs[0].id, {action: "openChat"});
-                            window.close();
-                        }, 100);
-                    });
-                } else {
-                    // Content script is ready
-                    chrome.tabs.sendMessage(tabs[0].id, {action: "openChat"});
-                    window.close();
-                }
-            });
-        });
+    settings = await send({
+      type: "SAVE_SETTINGS",
+      settings: { mode: "account", authToken: data.token, accountEmail: email, displayName: settings.displayName || email.split("@")[0] },
     });
+    showLoggedIn(email);
+  } catch (err) {
+    errorEl.textContent = err.message || "Couldn't reach the SiteTalk server. Check the server address under settings.";
+    errorEl.hidden = false;
+  }
+}
 
-    // Clear chat history
-    clearChatBtn.addEventListener('click', function() {
-        if (confirm('Are you sure you want to clear all chat history for this site?')) {
-            chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-                const currentTab = tabs[0];
-                const url = new URL(currentTab.url);
-                const domain = url.hostname;
-                
-                // Clear messages for this domain
-                chrome.storage.local.remove(domain, function() {
-                    messageCountElement.textContent = '0';
-                    // Try to send message, but don't worry if it fails
-                    try {
-                        chrome.tabs.sendMessage(tabs[0].id, {action: "clearChat"});
-                    } catch (e) {
-                        console.log("Content script not available");
-                    }
-                });
-            });
-        }
-    });
+function showLoggedIn(email) {
+  document.getElementById("loggedOutView").hidden = true;
+  document.getElementById("loggedInView").hidden = false;
+  document.getElementById("accountEmail").textContent = email;
+}
 
-    // Settings button
-    settingsBtn.addEventListener('click', function() {
-        // This will be implemented later
-        alert('Settings coming soon!');
-    });
+function showLoggedOut() {
+  document.getElementById("loggedOutView").hidden = false;
+  document.getElementById("loggedInView").hidden = true;
+}
 
-    // Update online count (this would be more dynamic with a real backend)
-    function updateOnlineCount() {
-        // For now, we'll simulate 1-5 random users
-        const randomUsers = Math.floor(Math.random() * 5) + 1;
-        onlineCountElement.textContent = randomUsers;
-    }
-    
-    // Update online count every 10 seconds
-    updateOnlineCount();
-    setInterval(updateOnlineCount, 10000);
-});
+function flash(btn) {
+  const original = btn.textContent;
+  btn.textContent = "Saved ✓";
+  setTimeout(() => (btn.textContent = original), 1200);
+}

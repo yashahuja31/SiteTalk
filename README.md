@@ -1,178 +1,55 @@
+# SiteTalk
 
-# 🚀 SiteChat – Real-time Chat Anywhere on the Web
+A Chrome extension that turns any website into a live chat room for whoever's on that page right now. Anonymous by default — sign in only if you want a name that follows you around.
 
-**SiteChat** is a Chrome browser extension that allows users on the same website to chat with each other in real time.
-
-* 🔥 Floating chat popup (draggable & resizable)
-* 💬 Text messaging + 🎤 voice message support
-* ⏱ Messages are timestamped and synced for all users
-* 🗂 Last **50 messages are stored** per site (new users see existing conversation history)
-
-With SiteChat, every website becomes a community!
-
----
-
-## 📂 Project Structure
-
-```bash
-sitechat/
-├── manifest.json        # Chrome extension config file
-├── popup.html           # Popup chat UI
-├── popup.js             # Popup logic (text, voice messages, UI handling)
-├── content.js           # Injected into the website (handles floating chat)
-├── background.js        # Handles connections, storage, sync
-├── styles.css           # Styles for popup
-├── icons/               # Extension icons
-│   ├── icon16.png
-│   ├── icon48.png
-│   └── icon128.png
-├── server/              # (Optional) Node.js backend for message sync
+```
+SiteTalk/
+├── manifest.json        # Chrome extension config (Manifest V3)
+├── background.js        # Service worker: settings, badge, tab state
+├── content.js            # Injected into every page — builds the floating widget, owns the WebSocket
+├── popup.html/js/css     # Toolbar popup — status, guest name, sign in
+├── icons/                # Extension icons
+├── server/               # Realtime backend (Node + Express + ws)
 │   ├── index.js
-│   └── package.json
-└── README.md            # This file
+│   ├── package.json
+│   └── .env.example
+└── website/              # Static marketing site (index.html/styles.css/script.js)
 ```
 
----
+## How it works
 
-## ⚙️ Installation
+- **Rooms are hostnames.** Everyone on `example.com` is in the same room — no setup, no invite links.
+- **Anonymous by default.** Each browser gets a randomly generated guest name (e.g. "Quiet Otter"), stored locally via `chrome.storage.local`. No account required.
+- **Optional accounts.** The popup has a sign-in tab that talks to the backend's `/api/signup` and `/api/login` routes (email + password, JWT). Signing in keeps your display name consistent across sites.
+- **Text + voice.** Messages are plain WebSocket JSON frames; voice notes are recorded with `MediaRecorder`, base64-encoded, and relayed live (not persisted, to keep storage small).
+- **History.** The server keeps the last 50 text messages per room in a small JSON file (`server/data.json`) so new visitors have context. Swap this for Postgres/Redis before running this for real traffic.
+- **Isolated UI.** The widget renders inside a Shadow DOM, so its styles can never leak into — or be broken by — the host page's CSS.
 
-### 🔹 Method 1: Manual Install via Chrome Extensions Page
-
-1. Clone or download this repository:
-
-   ```bash
-   git clone https://github.com/yourusername/sitechat.git
-   cd sitechat
-   ```
-
-2. Open Chrome and go to:
-
-   ```
-   chrome://extensions/
-   ```
-
-3. Enable **Developer Mode** (toggle in top-right).
-
-4. Click **"Load unpacked"**.
-
-5. Select the `sitechat/` folder.
-
-6. You’ll see the **SiteChat icon** appear in your Chrome toolbar ✅.
-
----
-
-### 🔹 Method 2: Install via `.zip`
-
-1. Download the repo as `.zip` → [Download ZIP](https://github.com/yourusername/sitechat/archive/refs/heads/main.zip)
-2. Extract it locally.
-3. Follow the same steps as above (`chrome://extensions/ → Load unpacked`).
-
----
-
-### 🔹 Method 3: CLI Development Setup
-
-For devs who want to contribute:
+## Running the backend
 
 ```bash
-# Clone repo
-git clone https://github.com/yourusername/sitechat.git
-cd sitechat
-
-# Install optional server deps (if using Node backend)
 cd server
+cp .env.example .env   # edit JWT_SECRET before deploying anywhere public
 npm install
-
-# Run server
-node index.js
+npm start
 ```
 
-Now you can reload the extension from `chrome://extensions/`.
+The server listens on `ws://localhost:8080` for chat and exposes `POST /api/signup` / `POST /api/login` for accounts.
 
----
+## Loading the extension
 
-## 🛠️ Features
+1. Open `chrome://extensions`, enable **Developer mode**.
+2. Click **Load unpacked**, select this folder (the one with `manifest.json`).
+3. Click the SiteTalk toolbar icon, and under the ⚙ settings, point **Server address** at your backend, e.g. `ws://localhost:8080`.
+4. Browse to any site — the chat bubble appears in the bottom-right corner.
 
-* ✅ Floating draggable popup
-* ✅ Real-time text chat
-* ✅ Voice message support
-* ✅ Per-website chat rooms
-* ✅ Last 50 messages stored (with timestamps)
-* ✅ Works across all websites
-* ✅ Minimal permissions for privacy
+## Deploying for real use
 
----
+- Host `server/` anywhere that runs Node (Render, Fly.io, a small VPS) and give it a `wss://` domain — browsers require secure WebSockets from extensions running on `https://` pages.
+- Replace the JSON-file store in `server/index.js` with a real database once you expect meaningful traffic.
+- Publish the extension to the Chrome Web Store, then hardcode that production `wss://` URL as the default in `background.js`'s `DEFAULT_SETTINGS.serverUrl`.
+- `website/` is a static site — drop it on GitHub Pages, Vercel, or Netlify as-is.
 
-## 🔐 Permissions
+## License
 
-The extension uses the following permissions:
-
-```json
-"permissions": [
-  "storage", 
-  "tabs", 
-  "activeTab"
-],
-"host_permissions": [
-  "*://*/*"
-]
-```
-
-* `storage` → Store last 50 messages per website
-* `tabs/activeTab` → Identify which site you’re on
-* `host_permissions` → To inject floating chat on any site
-
----
-
-## 🧑‍💻 Development
-
-1. Edit `popup.html`, `popup.js`, or `content.js`.
-2. Reload from `chrome://extensions/ → Reload`.
-3. Test changes immediately in your browser.
-
----
-
-## 🤝 Contributing
-
-We welcome contributions!
-
-1. Fork the repository
-2. Create a feature branch:
-
-   ```bash
-   git checkout -b feature/my-feature
-   ```
-3. Commit changes:
-
-   ```bash
-   git commit -m "Added my feature"
-   ```
-4. Push to your branch:
-
-   ```bash
-   git push origin feature/my-feature
-   ```
-5. Open a Pull Request 🎉
-
----
-
-## ⚡ Troubleshooting
-
-* ❌ Extension not loading?
-  → Make sure `manifest.json` is in root folder.
-
-* ❌ Popup not appearing?
-  → Check if permissions are enabled.
-
-* ❌ Messages not syncing?
-  → Ensure background script is running.
-  → If using server mode, verify Node backend is running.
-
----
-
-## 📜 License
-
-MIT License © 2025 SiteChat
-
----
-
-
+MIT

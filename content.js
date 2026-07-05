@@ -1,389 +1,468 @@
-// Global variables
-let chatWindow = null;
-let chatMessages = [];
-let currentDomain = window.location.hostname;
-let username = "User" + Math.floor(Math.random() * 1000); // Random username
-let port = null; // Connection to background script
+// SiteTalk — content script
+// Injects a self-contained (Shadow DOM) floating chat widget into every page
+// and connects it to the SiteTalk realtime server for that site's room.
 
-// Connect to background script
-function connectToBackground() {
-    port = chrome.runtime.connect({name: "sitechat"});
-    
-    // Listen for messages from background script
-    port.onMessage.addListener(function(message) {
-        if (message.type === 'chat') {
-            // Add message to chat
-            chatMessages.push(message);
-            if (chatWindow) {
-                updateChatMessages();
-            }
-        } else if (message.type === 'userCount') {
-            // Update user count if chat window is open
-            if (chatWindow) {
-                updateOnlineCount(message.count);
-            }
-        }
+(() => {
+  if (window.__siteTalkInjected) return;
+  window.__siteTalkInjected = true;
+
+  const ROOM = location.hostname.replace(/^www\./, "") || "local";
+  const GUEST_ADJECTIVES = ["Quiet", "Curious", "Swift", "Lucky", "Bright", "Calm", "Bold", "Kind", "Sly", "Merry"];
+  const GUEST_ANIMALS = ["Otter", "Falcon", "Fox", "Panda", "Heron", "Wolf", "Lynx", "Sparrow", "Koala", "Orca"];
+
+  const MAX_VOICE_SECONDS = 20;
+
+  let ws = null;
+  let reconnectDelay = 1000;
+  let settings = null;
+  let guest = null; // { id, name }
+  let panelOpen = false;
+  let unread = 0;
+  let mediaRecorder = null;
+  let recordChunks = [];
+  let recordStart = 0;
+  let recordTimer = null;
+
+  init();
+
+  async function init() {
+    settings = await sendToBackground({ type: "GET_SETTINGS" });
+    guest = await loadOrCreateGuest();
+    buildUI();
+    connect();
+
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg.type === "SETTINGS_CHANGED") {
+        settings = msg.settings;
+        reconnect();
+      }
+      if (msg.type === "TOGGLE_PANEL") {
+        togglePanel();
+      }
     });
-}
+  }
 
-// Connect when page loads
-connectToBackground();
+  function sendToBackground(msg) {
+    return new Promise((resolve) => chrome.runtime.sendMessage(msg, resolve));
+  }
 
-// Listen for messages from popup.js or background.js
-chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
-    if (request.action === "openChat") {
-        openChatWindow();
-    } else if (request.action === "clearChat") {
-        chatMessages = [];
-        if (chatWindow) {
-            updateChatMessages();
-        }
-    }
-    return true;
-});
+  async function loadOrCreateGuest() {
+    const { siteTalkGuest } = await chrome.storage.local.get("siteTalkGuest");
+    if (siteTalkGuest?.id) return siteTalkGuest;
+    const name = `${pick(GUEST_ADJECTIVES)} ${pick(GUEST_ANIMALS)}`;
+    const created = { id: crypto.randomUUID(), name };
+    await chrome.storage.local.set({ siteTalkGuest: created });
+    return created;
+  }
 
-// Create and open chat window
-function openChatWindow() {
-    // If chat window already exists, just show it
-    if (chatWindow) {
-        chatWindow.style.display = 'block';
-        return;
-    }
+  function pick(arr) {
+    return arr[Math.floor(Math.random() * arr.length)];
+  }
 
-    // Create chat window container
-    chatWindow = document.createElement('div');
-    chatWindow.id = 'sitechat-window';
-    chatWindow.style.cssText = `
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        width: 320px;
-        height: 400px;
-        background: linear-gradient(135deg, #6366f1, #8b5cf6, #a855f7);
-        border-radius: 10px;
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-        z-index: 9999;
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  // ---------------------------------------------------------------------
+  // UI
+  // ---------------------------------------------------------------------
+  let root, panelEl, messagesEl, inputEl, statusDotEl, statusTextEl, unreadBadgeEl, sendBtn, micBtn, launcherEl;
+
+  function buildUI() {
+    const host = document.createElement("div");
+    host.id = "sitetalk-host";
+    host.style.all = "initial";
+    document.documentElement.appendChild(host);
+    root = host.attachShadow({ mode: "open" });
+
+    const style = document.createElement("style");
+    style.textContent = CSS;
+    root.appendChild(style);
+
+    const wrap = document.createElement("div");
+    wrap.className = "st-wrap";
+    wrap.innerHTML = `
+      <button class="st-launcher" title="Open SiteTalk">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none"><path d="M4 5h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4v-4H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" fill="currentColor"/></svg>
+        <span class="st-unread" hidden>0</span>
+      </button>
+      <div class="st-panel" hidden>
+        <div class="st-header">
+          <div class="st-header-left">
+            <span class="st-dot"></span>
+            <div class="st-titles">
+              <div class="st-title">SiteTalk</div>
+              <div class="st-subtitle">${escapeHtml(ROOM)}</div>
+            </div>
+          </div>
+          <div class="st-header-right">
+            <span class="st-status">connecting…</span>
+            <button class="st-icon-btn st-minimize" title="Minimize">–</button>
+          </div>
+        </div>
+        <div class="st-messages"></div>
+        <div class="st-composer">
+          <button class="st-icon-btn st-mic" title="Record a voice message">
+            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
+          </button>
+          <input class="st-input" type="text" maxlength="500" placeholder="Message everyone on this page…" />
+          <button class="st-send" title="Send">
+            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M3 20l18-8L3 4v6l12 2-12 2z"/></svg>
+          </button>
+        </div>
+        <div class="st-footer">
+          <span>${guest.name}</span>
+          <button class="st-linklike st-identity">change name</button>
+          <span class="st-sep">·</span>
+          <button class="st-linklike st-account">${settings?.mode === "account" ? "account" : "sign in"}</button>
+        </div>
+      </div>
     `;
+    root.appendChild(wrap);
 
-    // Create chat header
-    const chatHeader = document.createElement('div');
-    chatHeader.style.cssText = `
-        padding: 12px 15px;
-        background-color: rgba(255, 255, 255, 0.1);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        cursor: move;
-        user-select: none;
-    `;
-    
-    const chatTitle = document.createElement('div');
-    chatTitle.textContent = '💬 SiteChat - ' + currentDomain;
-    chatTitle.style.cssText = `
-        color: white;
-        font-weight: 600;
-        font-size: 14px;
-    `;
-    
-    const closeButton = document.createElement('button');
-    closeButton.textContent = '✕';
-    closeButton.style.cssText = `
-        background: none;
-        border: none;
-        color: white;
-        font-size: 16px;
-        cursor: pointer;
-        padding: 0;
-    `;
-    closeButton.onclick = function() {
-        chatWindow.style.display = 'none';
-    };
-    
-    chatHeader.appendChild(chatTitle);
-    chatHeader.appendChild(closeButton);
-    chatWindow.appendChild(chatHeader);
+    launcherEl = root.querySelector(".st-launcher");
+    unreadBadgeEl = root.querySelector(".st-unread");
+    panelEl = root.querySelector(".st-panel");
+    messagesEl = root.querySelector(".st-messages");
+    inputEl = root.querySelector(".st-input");
+    sendBtn = root.querySelector(".st-send");
+    micBtn = root.querySelector(".st-mic");
+    statusDotEl = root.querySelector(".st-dot");
+    statusTextEl = root.querySelector(".st-status");
 
-    // Create messages container
-    const messagesContainer = document.createElement('div');
-    messagesContainer.id = 'sitechat-messages';
-    messagesContainer.style.cssText = `
-        flex: 1;
-        overflow-y: auto;
-        padding: 15px;
-        background-color: rgba(255, 255, 255, 0.1);
-    `;
-    chatWindow.appendChild(messagesContainer);
-
-    // Create input area
-    const inputArea = document.createElement('div');
-    inputArea.style.cssText = `
-        display: flex;
-        padding: 10px;
-        background-color: rgba(255, 255, 255, 0.1);
-    `;
-    
-    const messageInput = document.createElement('input');
-    messageInput.type = 'text';
-    messageInput.placeholder = 'Type a message...';
-    messageInput.style.cssText = `
-        flex: 1;
-        padding: 8px 12px;
-        border: none;
-        border-radius: 20px;
-        margin-right: 8px;
-        outline: none;
-    `;
-    
-    const sendButton = document.createElement('button');
-    sendButton.textContent = '📤';
-    sendButton.style.cssText = `
-        background-color: white;
-        border: none;
-        border-radius: 50%;
-        width: 36px;
-        height: 36px;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 16px;
-    `;
-    
-    const voiceButton = document.createElement('button');
-    voiceButton.textContent = '🎤';
-    voiceButton.style.cssText = `
-        background-color: white;
-        border: none;
-        border-radius: 50%;
-        width: 36px;
-        height: 36px;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 16px;
-        margin-right: 8px;
-    `;
-    
-    inputArea.appendChild(messageInput);
-    inputArea.appendChild(voiceButton);
-    inputArea.appendChild(sendButton);
-    chatWindow.appendChild(inputArea);
-
-    // Add to document
-    document.body.appendChild(chatWindow);
-
-    // Load existing messages
-    loadMessages();
-
-    // Make chat window draggable
-    makeDraggable(chatWindow, chatHeader);
-
-    // Add event listeners
-    messageInput.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            sendMessage(messageInput.value);
-            messageInput.value = '';
-        }
+    launcherEl.addEventListener("click", togglePanel);
+    root.querySelector(".st-minimize").addEventListener("click", togglePanel);
+    sendBtn.addEventListener("click", sendTextMessage);
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") sendTextMessage();
+    });
+    micBtn.addEventListener("click", toggleRecording);
+    root.querySelector(".st-identity").addEventListener("click", renameGuest);
+    root.querySelector(".st-account").addEventListener("click", () => {
+      chrome.runtime.sendMessage({ type: "OPEN_POPUP" });
+      alert("Open the SiteTalk toolbar icon to sign in or create an account.");
     });
 
-    sendButton.addEventListener('click', function() {
-        sendMessage(messageInput.value);
-        messageInput.value = '';
-    });
+    makeDraggable(wrap.querySelector(".st-header"), wrap);
+  }
 
-    voiceButton.addEventListener('click', function() {
-        toggleVoiceRecording(voiceButton);
-    });
-}
-
-// Make an element draggable
-function makeDraggable(element, handle) {
-    let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
-    
-    handle.onmousedown = dragMouseDown;
-
-    function dragMouseDown(e) {
-        e.preventDefault();
-        // Get mouse position at startup
-        pos3 = e.clientX;
-        pos4 = e.clientY;
-        document.onmouseup = closeDragElement;
-        // Call function whenever cursor moves
-        document.onmousemove = elementDrag;
+  function togglePanel() {
+    panelOpen = !panelOpen;
+    panelEl.hidden = !panelOpen;
+    if (panelOpen) {
+      unread = 0;
+      updateUnreadBadge();
+      inputEl.focus();
+      messagesEl.scrollTop = messagesEl.scrollHeight;
     }
+    reportState();
+  }
 
-    function elementDrag(e) {
-        e.preventDefault();
-        // Calculate new position
-        pos1 = pos3 - e.clientX;
-        pos2 = pos4 - e.clientY;
-        pos3 = e.clientX;
-        pos4 = e.clientY;
-        // Set element's new position
-        element.style.top = (element.offsetTop - pos2) + "px";
-        element.style.left = (element.offsetLeft - pos1) + "px";
-        element.style.bottom = "auto";
-        element.style.right = "auto";
+  async function renameGuest() {
+    const next = prompt("Pick a display name for this device:", guest.name);
+    if (!next) return;
+    guest = { ...guest, name: next.slice(0, 24) };
+    await chrome.storage.local.set({ siteTalkGuest: guest });
+    root.querySelector(".st-footer span").textContent = guest.name;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "rename", name: guest.name }));
     }
+  }
 
-    function closeDragElement() {
-        // Stop moving when mouse button is released
-        document.onmouseup = null;
-        document.onmousemove = null;
-    }
-}
+  function updateUnreadBadge() {
+    unreadBadgeEl.hidden = unread === 0;
+    unreadBadgeEl.textContent = unread > 9 ? "9+" : String(unread);
+  }
 
-// Send a new message
-function sendMessage(text) {
-    if (!text.trim()) return;
-    
-    const message = {
-        username: username,
-        text: text,
-        timestamp: new Date().toISOString(),
-        type: 'chat',
-        messageType: 'text'
-    };
-    
-    // Add to local messages
-    chatMessages.push(message);
-    saveMessages();
-    updateChatMessages();
-    
-    // Send to background script for broadcasting to other users
-    if (port) {
-        port.postMessage(message);
-    }
-}
-
-// Toggle voice recording
-function toggleVoiceRecording(button) {
-    // This is a placeholder for voice recording functionality
-    // In a real implementation, this would use the Web Audio API
-    
-    if (button.textContent === '🎤') {
-        button.textContent = '⏹️';
-        button.style.backgroundColor = '#ff4d4d';
-        alert('Voice recording is not implemented in this demo.');
+  function setStatus(state, participants) {
+    statusDotEl.className = `st-dot st-dot-${state}`;
+    if (state === "connected") {
+      statusTextEl.textContent = participants === 1 ? "just you here" : `${participants} online`;
+    } else if (state === "connecting") {
+      statusTextEl.textContent = "connecting…";
     } else {
-        button.textContent = '🎤';
-        button.style.backgroundColor = 'white';
+      statusTextEl.textContent = "offline";
     }
-}
+  }
 
-// Load messages from storage
-function loadMessages() {
-    chrome.storage.local.get([currentDomain], function(result) {
-        if (result[currentDomain]) {
-            chatMessages = result[currentDomain];
-            updateChatMessages();
-        }
+  function appendMessage({ id, name, text, mine, system, ts, voiceUrl, voiceSeconds }) {
+    const row = document.createElement("div");
+    row.className = `st-row ${mine ? "st-row-mine" : ""} ${system ? "st-row-system" : ""}`;
+    const time = ts ? new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+
+    if (system) {
+      row.innerHTML = `<div class="st-system">${escapeHtml(text)}</div>`;
+    } else if (voiceUrl) {
+      row.innerHTML = `
+        <div class="st-bubble">
+          <div class="st-name">${escapeHtml(name)}</div>
+          <audio controls src="${voiceUrl}" style="width:180px;height:32px;"></audio>
+          <div class="st-time">${time} · ${voiceSeconds || 0}s</div>
+        </div>`;
+    } else {
+      row.innerHTML = `
+        <div class="st-bubble">
+          <div class="st-name">${escapeHtml(name)}</div>
+          <div class="st-text">${escapeHtml(text)}</div>
+          <div class="st-time">${time}</div>
+        </div>`;
+    }
+    messagesEl.appendChild(row);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+
+    if (!panelOpen && !system) {
+      unread += 1;
+      updateUnreadBadge();
+    }
+  }
+
+  function escapeHtml(str = "") {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function makeDraggable(handle, wrap) {
+    let dragging = false, startX, startY, startRight, startBottom;
+    handle.addEventListener("mousedown", (e) => {
+      if (e.target.closest("button")) return;
+      dragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      const rect = panelEl.getBoundingClientRect();
+      startRight = window.innerWidth - rect.right;
+      startBottom = window.innerHeight - rect.bottom;
+      e.preventDefault();
     });
-}
-
-// Save messages to storage
-function saveMessages() {
-    // Limit to last 50 messages
-    if (chatMessages.length > 50) {
-        chatMessages = chatMessages.slice(-50);
-    }
-    
-    const data = {};
-    data[currentDomain] = chatMessages;
-    chrome.storage.local.set(data);
-}
-
-// Update chat messages in the UI
-function updateChatMessages() {
-    const messagesContainer = document.getElementById('sitechat-messages');
-    if (!messagesContainer) return;
-    
-    messagesContainer.innerHTML = '';
-    
-    chatMessages.forEach(message => {
-        const messageElement = document.createElement('div');
-        messageElement.style.cssText = `
-            margin-bottom: 10px;
-            max-width: 80%;
-            ${message.username === username ? 'margin-left: auto;' : ''}
-        `;
-        
-        const bubbleElement = document.createElement('div');
-        bubbleElement.style.cssText = `
-            background-color: ${message.username === username ? 'white' : 'rgba(255, 255, 255, 0.7)'};
-            color: ${message.username === username ? '#6366f1' : '#333'};
-            border-radius: 18px;
-            padding: 8px 12px;
-            display: inline-block;
-            word-break: break-word;
-        `;
-        
-        const messageType = message.messageType || message.type;
-        if (messageType === 'text') {
-            bubbleElement.textContent = message.text;
-        } else if (messageType === 'voice') {
-            // Placeholder for voice messages
-            const voiceIcon = document.createElement('span');
-            voiceIcon.textContent = '🔊 ';
-            bubbleElement.appendChild(voiceIcon);
-            
-            const voiceText = document.createElement('span');
-            voiceText.textContent = 'Voice message';
-            bubbleElement.appendChild(voiceText);
-        }
-        
-        const metaElement = document.createElement('div');
-        metaElement.style.cssText = `
-            font-size: 11px;
-            color: rgba(255, 255, 255, 0.7);
-            margin-top: 2px;
-            ${message.username === username ? 'text-align: right;' : ''}
-        `;
-        
-        const time = new Date(message.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-        metaElement.textContent = `${message.username} • ${time}`;
-        
-        messageElement.appendChild(bubbleElement);
-        messageElement.appendChild(metaElement);
-        messagesContainer.appendChild(messageElement);
+    window.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      panelEl.style.right = `${Math.max(8, startRight - dx)}px`;
+      panelEl.style.bottom = `${Math.max(8, startBottom - dy)}px`;
     });
-    
-    // Scroll to bottom
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-}
+    window.addEventListener("mouseup", () => (dragging = false));
+  }
 
-// Update online user count in the UI
-function updateOnlineCount(count) {
-    if (!chatWindow) return;
-    
-    // Find or create the online count element
-    let onlineCountElement = document.getElementById('sitechat-online-count');
-    if (!onlineCountElement) {
-        onlineCountElement = document.createElement('div');
-        onlineCountElement.id = 'sitechat-online-count';
-        onlineCountElement.style.cssText = `
-            position: absolute;
-            top: 12px;
-            right: 40px;
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.8);
-        `;
-        const chatHeader = chatWindow.querySelector('div');
-        if (chatHeader) {
-            chatHeader.appendChild(onlineCountElement);
-        }
+  // ---------------------------------------------------------------------
+  // Realtime connection
+  // ---------------------------------------------------------------------
+  function connect() {
+    if (!settings?.serverUrl) return;
+    setStatus("connecting");
+    const params = new URLSearchParams({
+      room: ROOM,
+      name: settings.mode === "account" && settings.displayName ? settings.displayName : guest.name,
+      guestId: guest.id,
+      token: settings.mode === "account" ? settings.authToken || "" : "",
+    });
+    try {
+      ws = new WebSocket(`${settings.serverUrl}?${params.toString()}`);
+    } catch {
+      scheduleReconnect();
+      return;
     }
-    
-    onlineCountElement.textContent = `👥 ${count} online`;
-}
 
-// Initialize when the page loads
-window.addEventListener('load', function() {
-    // We don't automatically open the chat window
-    // It will be opened when the user clicks the button in the popup
-});
+    ws.onopen = () => {
+      reconnectDelay = 1000;
+    };
+
+    ws.onmessage = (evt) => {
+      let data;
+      try {
+        data = JSON.parse(evt.data);
+      } catch {
+        return;
+      }
+      handleServerMessage(data);
+    };
+
+    ws.onclose = () => {
+      setStatus("offline");
+      reportState(false);
+      scheduleReconnect();
+    };
+
+    ws.onerror = () => ws.close();
+  }
+
+  function scheduleReconnect() {
+    setTimeout(connect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 1.7, 20000);
+  }
+
+  function reconnect() {
+    if (ws) ws.close();
+    connect();
+  }
+
+  function handleServerMessage(data) {
+    switch (data.type) {
+      case "history":
+        messagesEl.innerHTML = "";
+        for (const m of data.messages || []) {
+          appendMessage({ ...m, mine: m.guestId === guest.id });
+        }
+        setStatus("connected", data.participants ?? 1);
+        reportState(true, data.participants);
+        break;
+      case "message":
+        appendMessage({ ...data, mine: data.guestId === guest.id });
+        break;
+      case "voice":
+        appendMessage({ ...data, mine: data.guestId === guest.id, voiceUrl: `data:audio/webm;base64,${data.audio}` });
+        break;
+      case "presence":
+        setStatus("connected", data.participants);
+        reportState(true, data.participants);
+        break;
+      case "system":
+        appendMessage({ system: true, text: data.text });
+        break;
+      default:
+        break;
+    }
+  }
+
+  function reportState(connected = true, participants = 0) {
+    chrome.runtime.sendMessage({
+      type: "STATE_UPDATE",
+      connected,
+      participants,
+      room: ROOM,
+      unread,
+    });
+  }
+
+  function sendTextMessage() {
+    const text = inputEl.value.trim();
+    if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: "message", text }));
+    inputEl.value = "";
+  }
+
+  // ---------------------------------------------------------------------
+  // Voice messages
+  // ---------------------------------------------------------------------
+  async function toggleRecording() {
+    if (mediaRecorder && mediaRecorder.state === "recording") {
+      mediaRecorder.stop();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordChunks = [];
+      mediaRecorder = new MediaRecorder(stream);
+      mediaRecorder.ondataavailable = (e) => recordChunks.push(e.data);
+      mediaRecorder.onstop = onRecordingStop;
+      mediaRecorder.start();
+      recordStart = Date.now();
+      micBtn.classList.add("st-recording");
+      recordTimer = setTimeout(() => mediaRecorder?.state === "recording" && mediaRecorder.stop(), MAX_VOICE_SECONDS * 1000);
+    } catch {
+      alert("SiteTalk needs microphone access to send a voice message.");
+    }
+  }
+
+  async function onRecordingStop() {
+    clearTimeout(recordTimer);
+    micBtn.classList.remove("st-recording");
+    const seconds = Math.round((Date.now() - recordStart) / 1000);
+    const blob = new Blob(recordChunks, { type: "audio/webm" });
+    if (blob.size === 0 || seconds < 1) return;
+    const base64 = await blobToBase64(blob);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "voice", audio: base64, seconds }));
+    }
+  }
+
+  function blobToBase64(blob) {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result.split(",")[1]);
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Styles (scoped inside the Shadow DOM — cannot leak into the host page)
+  // ---------------------------------------------------------------------
+  const CSS = `
+    :host, .st-wrap, .st-wrap * { box-sizing: border-box; font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; }
+    .st-wrap { position: fixed; bottom: 20px; right: 20px; z-index: 2147483647; }
+    .st-launcher {
+      width: 52px; height: 52px; border-radius: 50%; border: none; cursor: pointer;
+      background: linear-gradient(135deg, #3D5AFE, #00C2A8); color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 8px 24px rgba(20, 24, 40, 0.28); position: relative;
+      transition: transform .15s ease;
+    }
+    .st-launcher:hover { transform: translateY(-2px); }
+    .st-unread {
+      position: absolute; top: -4px; right: -4px; background: #FF5D5D; color: #fff;
+      font-size: 11px; font-weight: 700; min-width: 18px; height: 18px; border-radius: 9px;
+      display: flex; align-items: center; justify-content: center; padding: 0 4px;
+      border: 2px solid #fff;
+    }
+    .st-panel {
+      position: fixed; bottom: 84px; right: 20px; width: 320px; height: 440px;
+      background: #14161F; color: #EDEEF3; border-radius: 16px; overflow: hidden;
+      box-shadow: 0 20px 60px rgba(10, 12, 20, 0.45); display: flex; flex-direction: column;
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .st-header {
+      display: flex; align-items: center; justify-content: space-between; padding: 12px 14px;
+      background: #1B1E2B; cursor: move; user-select: none; border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .st-header-left { display: flex; align-items: center; gap: 8px; }
+    .st-dot { width: 8px; height: 8px; border-radius: 50%; background: #6b7280; flex: none; }
+    .st-dot-connected { background: #2ECC71; box-shadow: 0 0 6px #2ECC71; }
+    .st-dot-connecting { background: #F5A623; }
+    .st-dot-offline { background: #FF5D5D; }
+    .st-titles { line-height: 1.2; }
+    .st-title { font-weight: 700; font-size: 13px; letter-spacing: .2px; }
+    .st-subtitle { font-size: 11px; color: #9AA0B4; }
+    .st-header-right { display: flex; align-items: center; gap: 8px; }
+    .st-status { font-size: 11px; color: #9AA0B4; }
+    .st-icon-btn {
+      background: transparent; border: none; color: #C9CCDA; cursor: pointer; font-size: 16px;
+      width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+    }
+    .st-icon-btn:hover { background: rgba(255,255,255,0.08); }
+    .st-messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+    .st-messages::-webkit-scrollbar { width: 6px; }
+    .st-messages::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+    .st-row { display: flex; }
+    .st-row-mine { justify-content: flex-end; }
+    .st-row-system { justify-content: center; }
+    .st-system { font-size: 11px; color: #757C93; font-style: italic; }
+    .st-bubble {
+      max-width: 78%; background: #22263A; padding: 8px 10px; border-radius: 12px 12px 12px 3px;
+      font-size: 13px;
+    }
+    .st-row-mine .st-bubble { background: linear-gradient(135deg, #3D5AFE, #2843d1); border-radius: 12px 12px 3px 12px; }
+    .st-name { font-size: 11px; font-weight: 700; color: #9AA0B4; margin-bottom: 2px; }
+    .st-row-mine .st-name { color: rgba(255,255,255,0.75); }
+    .st-text { line-height: 1.4; word-break: break-word; }
+    .st-time { font-size: 10px; color: #757C93; margin-top: 3px; text-align: right; }
+    .st-row-mine .st-time { color: rgba(255,255,255,0.6); }
+    .st-composer {
+      display: flex; align-items: center; gap: 6px; padding: 10px; border-top: 1px solid rgba(255,255,255,0.06);
+      background: #1B1E2B;
+    }
+    .st-input {
+      flex: 1; background: #14161F; border: 1px solid rgba(255,255,255,0.08); color: #EDEEF3;
+      border-radius: 10px; padding: 8px 10px; font-size: 13px; outline: none;
+    }
+    .st-input:focus { border-color: #3D5AFE; }
+    .st-send, .st-mic {
+      background: #22263A; border: none; color: #C9CCDA; width: 32px; height: 32px; border-radius: 10px;
+      cursor: pointer; display: flex; align-items: center; justify-content: center; flex: none;
+    }
+    .st-send:hover, .st-mic:hover { background: #2c3150; }
+    .st-mic.st-recording { background: #FF5D5D; color: #fff; animation: st-pulse 1s infinite; }
+    @keyframes st-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .6; } }
+    .st-footer {
+      display: flex; align-items: center; gap: 6px; padding: 6px 12px 10px; font-size: 11px; color: #757C93;
+      background: #1B1E2B;
+    }
+    .st-linklike { background: none; border: none; color: #7C9BFF; cursor: pointer; font-size: 11px; padding: 0; }
+    .st-sep { color: #444a63; }
+  `;
+})();

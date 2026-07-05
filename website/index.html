@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SiteTalk — turn any page into a live chat room</title>
+<meta name="description" content="SiteTalk is a Chrome extension that lets anyone browsing the same page chat in real time — anonymous by default, sign in when you want a name that sticks." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<div class="noise-layer" aria-hidden="true"></div>
+
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a href="#" class="logo"><span class="logo-mark"></span>SiteTalk</a>
+    <nav class="nav">
+      <a href="#how">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#privacy">Privacy</a>
+      <a href="#install">Install</a>
+    </nav>
+    <a class="btn btn-primary" href="#install">Add to Chrome</a>
+  </div>
+</header>
+
+<main>
+
+  <!-- ============ HERO ============ -->
+  <section class="hero wrap">
+    <div class="hero-copy">
+      <p class="eyebrow">A browser extension, not another app</p>
+      <h1>Every webpage<br>is already a room<br>full of people.</h1>
+      <p class="lede">SiteTalk drops a live chat onto whatever page you're on — the same page, at the same time, as everyone else looking at it. No account needed. No app to open. Just the page, and the people reading it with you.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary btn-lg" href="#install">Add to Chrome — it's free</a>
+        <a class="btn btn-ghost btn-lg" href="https://github.com/yashahuja31/SiteTalk" target="_blank" rel="noopener">View source</a>
+      </div>
+      <div class="hero-meta">
+        <span>Anonymous by default</span><span class="dot">·</span><span>Open source</span><span class="dot">·</span><span>~40kb, no build step</span>
+      </div>
+    </div>
+
+    <div class="hero-visual" aria-hidden="true">
+      <div class="browser-mock">
+        <div class="browser-chrome">
+          <span class="chrome-dot"></span><span class="chrome-dot"></span><span class="chrome-dot"></span>
+          <div class="chrome-url">example-news.com/live-blog</div>
+        </div>
+        <div class="browser-page">
+          <div class="page-line w-70"></div>
+          <div class="page-line w-100"></div>
+          <div class="page-line w-90"></div>
+          <div class="page-line w-40"></div>
+          <div class="page-block"></div>
+        </div>
+        <div class="widget-mock">
+          <div class="widget-header">
+            <span class="widget-dot"></span>
+            <div class="widget-titles">
+              <div class="widget-title">SiteTalk</div>
+              <div class="widget-sub">example-news.com</div>
+            </div>
+            <span class="widget-count" id="liveCount">3 online</span>
+          </div>
+          <div class="widget-messages" id="widgetMessages"></div>
+          <div class="widget-composer">
+            <span class="composer-placeholder">Message everyone on this page…</span>
+            <span class="composer-send">➤</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ HOW IT WORKS ============ -->
+  <section id="how" class="how wrap">
+    <h2>Three steps. That's the whole install.</h2>
+    <div class="how-grid">
+      <div class="how-step">
+        <span class="how-index">01</span>
+        <h3>Add the extension</h3>
+        <p>One click from the Chrome Web Store. SiteTalk sits quietly in your toolbar until you need it.</p>
+      </div>
+      <div class="how-step">
+        <span class="how-index">02</span>
+        <h3>Browse like normal</h3>
+        <p>A small bubble appears in the corner of every site. It knows how many other SiteTalk users are on that exact page, right now.</p>
+      </div>
+      <div class="how-step">
+        <span class="how-index">03</span>
+        <h3>Say something</h3>
+        <p>Tap the bubble and start typing — or hold the mic for a quick voice note. Everyone currently on the page sees it instantly.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FEATURES ============ -->
+  <section id="features" class="features wrap">
+    <div class="features-head">
+      <h2>Built for the page you're already on</h2>
+      <p>SiteTalk isn't a separate destination — it's a layer over the web you're already browsing.</p>
+    </div>
+    <div class="features-grid">
+      <article class="feature-card">
+        <div class="feature-icon">◐</div>
+        <h3>Per-site rooms</h3>
+        <p>Every hostname gets its own room automatically. No setup, no invite links — being on the same page is the invite.</p>
+      </article>
+      <article class="feature-card">
+        <div class="feature-icon">✎</div>
+        <h3>Text &amp; voice</h3>
+        <p>Type a message or hold the mic for a short voice note. Both show up inline, timestamped, in the same thread.</p>
+      </article>
+      <article class="feature-card">
+        <div class="feature-icon">◍</div>
+        <h3>50 messages of memory</h3>
+        <p>New visitors see the last 50 messages, so a conversation has context instead of starting from silence every time.</p>
+      </article>
+      <article class="feature-card">
+        <div class="feature-icon">⛶</div>
+        <h3>Drag it anywhere</h3>
+        <p>The panel is draggable and stays out of your way — read the page, glance at the chat, keep scrolling.</p>
+      </article>
+      <article class="feature-card">
+        <div class="feature-icon">◑</div>
+        <h3>Anonymous or signed in</h3>
+        <p>Start talking with a random guest name in seconds, or sign in once to keep the same identity everywhere you go.</p>
+      </article>
+      <article class="feature-card">
+        <div class="feature-icon">▢</div>
+        <h3>Open source</h3>
+        <p>The extension, the server, and this site are all on GitHub. Read the code, self-host it, or send a pull request.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============ PRIVACY ============ -->
+  <section id="privacy" class="privacy wrap">
+    <div class="privacy-card">
+      <h2>Anonymous means anonymous</h2>
+      <p>By default, SiteTalk gives your device a random guest name like <em>“Quiet Otter”</em> — nothing tied to your identity, no email, no account. Messages live only in the room for that site, and only the last 50 are kept. Choose to sign in only if you want a name that follows you between sites.</p>
+      <div class="privacy-points">
+        <div><strong>No tracking scripts.</strong> SiteTalk only talks to its own chat server — nothing else.</div>
+        <div><strong>Minimal permissions.</strong> Just enough access to show the widget and know what page you're on.</div>
+        <div><strong>You control the name.</strong> Change your guest name any time, per device.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ INSTALL ============ -->
+  <section id="install" class="install wrap">
+    <h2>Install it in under a minute</h2>
+    <div class="install-grid">
+      <div class="install-steps">
+        <ol>
+          <li>Download or clone the <a href="https://github.com/yashahuja31/SiteTalk" target="_blank" rel="noopener">SiteTalk repository</a>.</li>
+          <li>Open <code>chrome://extensions</code> and turn on <strong>Developer mode</strong>.</li>
+          <li>Click <strong>Load unpacked</strong> and select the project folder.</li>
+          <li>Pin the SiteTalk icon to your toolbar — you're live.</li>
+        </ol>
+        <a class="btn btn-primary" href="https://github.com/yashahuja31/SiteTalk" target="_blank" rel="noopener">Get the source on GitHub</a>
+      </div>
+      <div class="install-terminal">
+        <div class="terminal-bar"><span></span><span></span><span></span></div>
+        <pre><code>$ git clone https://github.com/yashahuja31/SiteTalk.git
+$ cd SiteTalk/server
+$ npm install
+$ npm start
+SiteTalk server listening on :8080</code></pre>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <div class="logo"><span class="logo-mark"></span>SiteTalk</div>
+    <p>Built as an open-source side project. Not affiliated with any browser vendor.</p>
+    <div class="footer-links">
+      <a href="https://github.com/yashahuja31/SiteTalk" target="_blank" rel="noopener">GitHub</a>
+      <a href="#privacy">Privacy</a>
+      <a href="#install">Install</a>
+    </div>
+  </div>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>

@@ -1,124 +1,90 @@
-// SiteChat Background Script
-// Handles connections, storage, and synchronization
+// SiteTalk — background service worker
+// Keeps shared config, tracks per-tab connection state for the toolbar badge,
+// and relays small messages between the popup and the content script.
 
-// Initialize connection tracking
-let connections = {};
-let userCount = {};
+const DEFAULT_SETTINGS = {
+  serverUrl: "wss://sitetalk-server.example.com",
+  displayName: "",
+  mode: "anonymous", // "anonymous" | "account"
+  authToken: null,
+  enabled: true,
+};
 
-// Listen for connections from content scripts
-chrome.runtime.onConnect.addListener(function(port) {
-    if (port.name !== "sitechat") return;
-    
-    // Extract domain from the sender's URL
-    const sender = port.sender;
-    const url = new URL(sender.url);
-    const domain = url.hostname;
-    
-    // Track this connection
-    if (!connections[domain]) {
-        connections[domain] = [];
+chrome.runtime.onInstalled.addListener(async (details) => {
+  if (details.reason === "install") {
+    const existing = await chrome.storage.sync.get("settings");
+    if (!existing.settings) {
+      await chrome.storage.sync.set({ settings: DEFAULT_SETTINGS });
     }
-    connections[domain].push(port);
-    
-    // Update user count for this domain
-    userCount[domain] = connections[domain].length;
-    
-    // Notify all connections on this domain about the updated user count
-    broadcastUserCount(domain);
-    
-    // Listen for messages from this port
-    port.onMessage.addListener(function(message) {
-        // Handle different message types
-        if (message.type === 'chat') {
-            // Broadcast chat message to all connections on this domain
-            broadcastMessage(domain, message, port);
-        }
-    });
-    
-    // Handle disconnection
-    port.onDisconnect.addListener(function() {
-        // Remove this connection
-        if (connections[domain]) {
-            const index = connections[domain].indexOf(port);
-            if (index !== -1) {
-                connections[domain].splice(index, 1);
-            }
-            
-            // Update user count
-            userCount[domain] = connections[domain].length;
-            
-            // Clean up if no connections left for this domain
-            if (connections[domain].length === 0) {
-                delete connections[domain];
-                delete userCount[domain];
-            } else {
-                // Notify remaining users about the updated count
-                broadcastUserCount(domain);
-            }
-        }
-    });
+  }
 });
 
-// Broadcast a message to all connections on a domain
-function broadcastMessage(domain, message, senderPort) {
-    if (!connections[domain]) return;
-    
-    // Add timestamp if not present
-    if (!message.timestamp) {
-        message.timestamp = new Date().toISOString();
+// Track live connection + participant count per tab so the popup can show it.
+const tabState = new Map();
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const tabId = sender.tab?.id;
+
+  switch (message.type) {
+    case "STATE_UPDATE": {
+      if (tabId != null) {
+        tabState.set(tabId, {
+          connected: !!message.connected,
+          participants: message.participants ?? 0,
+          room: message.room ?? "",
+          unread: message.unread ?? 0,
+        });
+        chrome.action.setBadgeBackgroundColor({ color: "#3D5AFE" });
+        chrome.action.setBadgeText({
+          tabId,
+          text: message.unread ? String(Math.min(message.unread, 99)) : "",
+        });
+      }
+      break;
     }
-    
-    // Store message in local storage (limited to last 50)
-    storeMessage(domain, message);
-    
-    // Send to all connections except the sender
-    connections[domain].forEach(function(port) {
-        if (port !== senderPort) {
-            port.postMessage(message);
-        }
-    });
-}
 
-// Broadcast user count to all connections on a domain
-function broadcastUserCount(domain) {
-    if (!connections[domain]) return;
-    
-    const count = userCount[domain] || 0;
-    const message = {
-        type: 'userCount',
-        count: count
-    };
-    
-    connections[domain].forEach(function(port) {
-        port.postMessage(message);
-    });
-}
-
-// Store message in local storage
-function storeMessage(domain, message) {
-    chrome.storage.local.get([domain], function(result) {
-        let messages = result[domain] || [];
-        messages.push(message);
-        
-        // Limit to last 50 messages
-        if (messages.length > 50) {
-            messages = messages.slice(-50);
-        }
-        
-        // Save back to storage
-        const data = {};
-        data[domain] = messages;
-        chrome.storage.local.set(data);
-    });
-}
-
-// Listen for installation
-chrome.runtime.onInstalled.addListener(function(details) {
-    if (details.reason === "install") {
-        // First-time installation
-        console.log("SiteChat installed successfully!");
-    } else if (details.reason === "update") {
-        // Extension updated
-        console.log("SiteChat updated to version " + chrome.runtime.getManifest().version);
+    case "GET_TAB_STATE": {
+      chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+        const state = tab ? tabState.get(tab.id) : null;
+        sendResponse(state || { connected: false, participants: 0, room: "" });
+      });
+      return true; // async response
     }
+
+    case "GET_SETTINGS": {
+      chrome.storage.sync.get("settings").then(({ settings }) => {
+        sendResponse(settings || DEFAULT_SETTINGS);
+      });
+      return true;
+    }
+
+    case "SAVE_SETTINGS": {
+      chrome.storage.sync.get("settings").then(async ({ settings }) => {
+        const merged = { ...(settings || DEFAULT_SETTINGS), ...message.settings };
+        await chrome.storage.sync.set({ settings: merged });
+        // Tell every tab's content script to pick up the new settings.
+        chrome.tabs.query({}, (tabs) => {
+          for (const t of tabs) {
+            chrome.tabs.sendMessage(t.id, { type: "SETTINGS_CHANGED", settings: merged }).catch(() => {});
+          }
+        });
+        sendResponse(merged);
+      });
+      return true;
+    }
+
+    case "TOGGLE_PANEL_FROM_POPUP": {
+      chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+        if (tab?.id != null) {
+          chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_PANEL" }).catch(() => {});
+        }
+      });
+      break;
+    }
+
+    default:
+      break;
+  }
 });
+
+chrome.tabs.onRemoved.addListener((tabId) => tabState.delete(tabId));
