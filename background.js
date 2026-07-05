@@ -3,7 +3,7 @@
 // and relays small messages between the popup and the content script.
 
 const DEFAULT_SETTINGS = {
-  serverUrl: "wss://sitetalk-server.example.com",
+  serverUrl: "https://sitetalk-neg7.onrender.com",
   displayName: "",
   mode: "anonymous", // "anonymous" | "account"
   authToken: null,
